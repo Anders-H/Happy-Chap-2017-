@@ -6,5 +6,5 @@ Back in 2017, Roger Johansson and I decided to put together a Commodore 64 demo,
 
 ## Resources
 
-- [The C64 program file](happychap.prg)
-- [A D64 disk image](happychapdisk.d64)
+- [The C64 program file](https://github.com/Anders-H/Happy-Chap-2017-/raw/refs/heads/main/happychap.prg)
+- [A D64 disk image](https://github.com/Anders-H/Happy-Chap-2017-/raw/refs/heads/main/happychapdisk.d64)
