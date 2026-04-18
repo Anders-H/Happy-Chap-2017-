@@ -1,0 +1,281 @@
+00001  0000             FUNGERAR   MEN MAX 255 TECKEN.
+00002  0001             
+00003  0001             ; ------------------------------------------------------------------------------
+00004  0001             ; HAPPY CHAP, MUSIC WRITTEN ON THE C64 IN 2017 BY ANDERS HESSELBOM.
+00005  0001             ; THIS CODE (2026) PLAYS THE SONG AND DISPLAYS A SCROLLTEXT.
+00006  0001             ; COMPILE USING CBM PRG STUDIO.
+00007  0001             ; ------------------------------------------------------------------------------
+00008  0001             
+00009  0001             ; START ADDRESS FOR THE BASIC STUB (SYS 2064)
+00010  0001             *          = $0801
+00011  0801             
+00012  0801  0B 08 0A              BYTE $0B,$08,$0A,$00
+00013  0805  9E 32 30              BYTE $9E,$32,$30,$36
+00014  0809  34 00 00              BYTE $34,$00,$00,$00
+00015  080D             
+00016  080D             ; CONSTANTS
+00017  080D             SCRBASE    = $0400                ; SKÄRM-RAM
+00018  080D             COLBASE    = $D800                ; FÄRG-RAM
+00019  080D             VICBGC     = $D021                ; BAKGRUNDSFÄRG
+00020  080D             VICCOL     = $D020                ; KANTFÄRG
+00021  080D             VICRAST    = $D012                ; RASTERLINJE
+00022  080D             VICCTRL1   = $D011                ; VIC KONTROLLREGISTER 1
+00023  080D             VICCTRL2   = $D016                ; VIC KONTROLLREGISTER 2 (X-SCROLL)
+00024  080D             IRQVEC     = $0314                ; AVBROTTSVEKTOR (KERNAL)
+00025  080D             CIA1ICR    = $DC0D                ; CIA1 AVBROTTSMASK
+00026  080D             VICIRQ     = $D019                ; VIC AVBROTTSREGISTER
+00027  080D             VICIRQM    = $D01A                ; VIC AVBROTTSMASK
+00028  080D             SID_INIT   = $8000                ; SID INIT-ADRESS
+00029  080D             SID_PLAY   = $8003                ; SID PLAY-ADRESS
+00030  080D             SCROLL_ROW = 12                 ; TEXTRAD FÖR SCROLLTEXT (0-24)
+00031  080D             SCROLL_SCR = SCRBASE + (SCROLL_ROW * 40)
+00032  080D             SCROLL_COL = COLBASE + (SCROLL_ROW * 40)
+00033  080D             ; RASTERLINJE FÖR IRQ2:
+00034  080D             ; VARJE TEXTRAD ÄR 8 PIXLAR HÖG.
+00035  080D             ; RAD 12 BÖRJAR PÅ RASTERLINJE 12*8 + 50 = 146
+00036  080D             ; VI LÄGGER IRQ2 PÅ LINJE 146 + 8 = 154, DVS PRECIS EFTER RAD 12
+00037  080D             IRQ1_LINE  = 100                 ; LINJE FÖR IRQ1 (FÖRE SCROLL-RADEN)
+00038  080D             IRQ2_LINE  = 154                 ; LINJE FÖR IRQ2 (EFTER SCROLL-RADEN)
+00039  080D             SCROLL_COLOR = 7                ; SCROLLTEXTENS FÄRG (7 = GUL)
+00040  080D             BG_COLOR   = 0                ; BAKGRUNDSFÄRG (0 = SVART)
+00041  080D             BORDER_COLOR = 0                ; KANTFÄRG (0 = SVART)
+00042  080D             
+00043  080D             ; ------------------------------------------------------------------------------
+00044  080D             ; PROGRAM START
+00045  080D                        * = $0810
+00046  0810             ; ------------------------------------------------------------------------------
+00047  0810             
+00048  0810             START
+00049  0810  78                    SEI
+00050  0811  A9 00                 LDA #BG_COLOR
+00051  0813  8D 21 D0              STA VICBGC
+00052  0816  A9 00                 LDA #BORDER_COLOR
+00053  0818  8D 20 D0              STA VICCOL
+00054  081B  20 12 09              JSR CLRSCR
+00055  081E                        ; FÄRGSÄTT SCROLL-RADEN
+00056  081E  A2 00                 LDX #0
+00057  0820  A9 07      COLINIT    LDA #SCROLL_COLOR
+00058  0822  9D E0 D9              STA SCROLL_COL,X
+00059  0825  E8                    INX
+00060  0826  E0 28                 CPX #40
+00061  0828  D0 F6                 BNE COLINIT
+00062  082A                        ; INITIERA SID
+00063  082A  A9 00                 LDA #0
+00064  082C  20 00 80              JSR SID_INIT
+00065  082F                        ; NOLLSTÄLL VARIABLER
+00066  082F  A9 00                 LDA #0
+00067  0831  8D 28 09              STA TEXT_IDX
+00068  0834  8D 29 09              STA TEXT_IDX+1
+00069  0837  8D 27 09              STA DO_SHIFT            ; FLAGGA FÖR SKIFT = AV
+00070  083A                        ; SET HARDWARE SCROLL TO 7
+00071  083A  A9 07                 LDA #7
+00072  083C  8D 26 09              STA FINE_X
+00073  083F  AD 16 D0              LDA VICCTRL2
+00074  0842  29 F8                 AND #%11111000
+00075  0844  29 F7                 AND #%11110111          ; 38-KOLUMNERS LÄGE
+00076  0846  09 07                 ORA #7
+00077  0848  8D 16 D0              STA VICCTRL2
+00078  084B                        ; FYLL SCROLL-RADEN MED MELLANSLAG
+00079  084B  A2 00                 LDX #0
+00080  084D  A9 20      FILSCR     LDA #32
+00081  084F  9D E0 05              STA SCROLL_SCR,X
+00082  0852  E8                    INX
+00083  0853  E0 28                 CPX #40
+00084  0855  D0 F6                 BNE FILSCR
+00085  0857                        ; SÄTT UPP RASTERAVBROTT
+00086  0857  A9 7F                 LDA #%01111111
+00087  0859  8D 0D DC              STA CIA1ICR
+00088  085C  AD 0D DC              LDA CIA1ICR
+00089  085F  A9 01                 LDA #%00000001
+00090  0861  8D 1A D0              STA VICIRQM
+00091  0864                        ; STARTA MED IRQ1
+00092  0864  A9 64                 LDA #IRQ1_LINE
+00093  0866  8D 12 D0              STA VICRAST
+00094  0869  AD 11 D0              LDA VICCTRL1
+00095  086C  29 7F                 AND #%01111111
+00096  086E  8D 11 D0              STA VICCTRL1
+00097  0871  A9 7F                 LDA #<IRQ1
+00098  0873  8D 14 03              STA IRQVEC
+00099  0876  A9 08                 LDA #>IRQ1
+00100  0878  8D 15 03              STA IRQVEC+1
+00101  087B  58                    CLI
+00102  087C  4C 7C 08   MAIN       JMP MAIN
+00103  087F             
+00104  087F             ; ------------------------------------------------------------------------------
+00105  087F             ; IRQ1: PLAY MUSIC AND UPDATE SCROLL VALUE
+00106  087F             ; ------------------------------------------------------------------------------
+00107  087F             
+00108  087F             IRQ1
+00109  087F  A9 01                 LDA #$01
+00110  0881  8D 19 D0              STA VICIRQ              ; KVITTERA AVBROTT
+00111  0884  20 03 80              JSR SID_PLAY            ; SPELA SID
+00112  0887                        ; MINSKA FINE_X OCH UPPDATERA $D016
+00113  0887  CE 26 09              DEC FINE_X
+00114  088A  AD 16 D0              LDA VICCTRL2
+00115  088D  29 F8                 AND #%11111000
+00116  088F  0D 26 09              ORA FINE_X
+00117  0892  8D 16 D0              STA VICCTRL2
+00118  0895                        ; OM FINE_X NÅTT 0: SÄTT FLAGGA FÖR SKIFT OCH ÅTERSTÄLL TILL 7
+00119  0895  AD 26 09              LDA FINE_X
+00120  0898  D0 0A                 BNE IRQ1_DONE
+00121  089A  A9 07                 LDA #7
+00122  089C  8D 26 09              STA FINE_X
+00123  089F  A9 01                 LDA #1
+00124  08A1  8D 27 09              STA DO_SHIFT            ; SÄTT SKIFT-FLAGGA
+00125  08A4             IRQ1_DONE
+00126  08A4                        ; VÄXLA TILL IRQ2
+00127  08A4  A9 9A                 LDA #IRQ2_LINE
+00128  08A6  8D 12 D0              STA VICRAST
+00129  08A9  A9 B6                 LDA #<IRQ2
+00130  08AB  8D 14 03              STA IRQVEC
+00131  08AE  A9 08                 LDA #>IRQ2
+00132  08B0  8D 15 03              STA IRQVEC+1
+00133  08B3  4C 31 EA              JMP $EA31
+00134  08B6             
+00135  08B6             ; ------------------------------------------------------------------------------
+00136  08B6             ; IRQ 2: SHIFT SCREEN MEMORY
+00137  08B6             ; ------------------------------------------------------------------------------
+00138  08B6             
+00139  08B6             IRQ2
+00140  08B6  A9 01                 LDA #$01
+00141  08B8  8D 19 D0              STA VICIRQ              ; KVITTERA AVBROTT
+00142  08BB                        ; SKA VI SHIFTA DENNA FRAME?
+00143  08BB  AD 27 09              LDA DO_SHIFT
+00144  08BE  F0 40                 BEQ IRQ2_DONE
+00145  08C0  A9 00                 LDA #0
+00146  08C2  8D 27 09              STA DO_SHIFT            ; NOLLSTÄLL FLAGGAN
+00147  08C5                        ; SHIFTA SKÄRM-RADEN ETT TECKEN ÅT VÄNSTER
+00148  08C5  A2 00                 LDX #0
+00149  08C7  BD E1 05   SHIFTLP    LDA SCROLL_SCR+1,X
+00150  08CA  9D E0 05              STA SCROLL_SCR,X
+00151  08CD  E8                    INX
+00152  08CE  E0 27                 CPX #39
+00153  08D0  D0 F5                 BNE SHIFTLP
+00154  08D2                        ; HÄMTA NÄSTA TECKEN UR SCROLLTEXTEN
+00155  08D2  AC 28 09              LDY TEXT_IDX
+00156  08D5  B9 2A 09              LDA SCROLLTEXT,Y
+00157  08D8  F0 19                 BEQ WRAP_TEXT
+00158  08DA                        ; KONVERTERA ASCII → PETSCII SKÄRMKOD
+00159  08DA  C9 41                 CMP #65                 ; >= 'A'?
+00160  08DC  90 07                 BCC PUT_CHAR
+00161  08DE  C9 5B                 CMP #91                 ; <= 'Z'?
+00162  08E0  B0 03                 BCS PUT_CHAR
+00163  08E2  38                    SEC
+00164  08E3  E9 40                 SBC #64                 ; A=1, B=2 ... Z=26
+00165  08E5             PUT_CHAR
+00166  08E5  8D 07 06              STA SCROLL_SCR+39       ; SÄTT TECKNET LÄNGST TILL HÖGER
+00167  08E8  EE 28 09              INC TEXT_IDX
+00168  08EB  D0 13                 BNE IRQ2_DONE
+00169  08ED  EE 29 09              INC TEXT_IDX+1
+00170  08F0  4C 00 09              JMP IRQ2_DONE
+00171  08F3             WRAP_TEXT
+00172  08F3  A9 00                 LDA #0
+00173  08F5  8D 28 09              STA TEXT_IDX
+00174  08F8  8D 29 09              STA TEXT_IDX+1
+00175  08FB  A9 20                 LDA #32
+00176  08FD  8D 07 06              STA SCROLL_SCR+39
+00177  0900             IRQ2_DONE
+00178  0900                        ; VÄXLA TILLBAKA TILL IRQ1
+00179  0900  A9 64                 LDA #IRQ1_LINE
+00180  0902  8D 12 D0              STA VICRAST
+00181  0905  A9 7F                 LDA #<IRQ1
+00182  0907  8D 14 03              STA IRQVEC
+00183  090A  A9 08                 LDA #>IRQ1
+00184  090C  8D 15 03              STA IRQVEC+1
+00185  090F  4C 31 EA              JMP $EA31
+00186  0912             
+00187  0912             ; ------------------------------------------------------------------------------
+00188  0912             ; CLEAR SCREEN
+00189  0912             ; ------------------------------------------------------------------------------
+00190  0912             
+00191  0912  A9 20      CLRSCR     LDA #32
+00192  0914  A2 00                 LDX #0
+00193  0916  9D 00 04   CLRLP      STA SCRBASE,X
+00194  0919  9D 00 05              STA SCRBASE+$100,X
+00195  091C  9D 00 06              STA SCRBASE+$200,X
+00196  091F  9D 00 07              STA SCRBASE+$300,X
+00197  0922  E8                    INX
+00198  0923  D0 F1                 BNE CLRLP
+00199  0925  60                    RTS
+00200  0926             
+00201  0926             ; ------------------------------------------------------------------------------
+00202  0926             ; VARIABLES
+00203  0926             ; ------------------------------------------------------------------------------
+00204  0926             
+00205  0926  07         FINE_X     BYTE 7              ; AKTUELLT HÅRDVARU-SCROLL-VÄRDE (0-7)
+00206  0927  00         DO_SHIFT   BYTE 0              ; FLAGGA: 1 = DAGS ATT SHIFTA SKÄRMMINNET
+00207  0928  00 00      TEXT_IDX   WORD 0              ; PEKARE IN I SCROLLTEXT
+00208  092A             
+00209  092A             ; ------------------------------------------------------------------------------
+00210  092A             ; SCROLLTEXT DATA.
+00211  092A             ; ------------------------------------------------------------------------------
+00212  092A             
+00213  092A             SCROLLTEXT 
+00214  092A  49 4E 20              BYTE "IN 2017, ROGER AND I DECIDED TO DO A C64 DEMO, JUST FOR FUN. "
+00215  0967  4B 4C 41              BYTE "KLAS HAD BROUGHT HIS MACHINE TO WORK, AND WE SQUEEZED IN SOME "
+00216  09A5  50 52 4F              BYTE "PROGRAMMING WHENEVER WE HAD A MOMENT BETWEEN CUSTOMER "
+00217  09DB  41 53 53              BYTE "ASSIGNMENTS. WE NEVER RELEASED ANYTHING, BUT THIS IS THE SID "
+00218  0A18  54 55 4E              BYTE "TUNE I WROTE.  "
+00219  0A27  00                    BYTE 0
+00220  0A28             
+00221  0A28             ; ------------------------------------------------------------------------------
+00222  0A28             ; LOAD THE SID MUSIC
+00223  0A28             ; ------------------------------------------------------------------------------
+00224  0A28             
+00225  0A28                        * = $8000
+00226  8000                        INCBIN "THE_ROGER_BOOGIE.SID", 126
+00227  86F2             
+
+******* 17 Label(s) *******
+CLRLP = $0916 
+CLRSCR = $0912 
+COLINIT = $0820 
+DO_SHIFT = $0927 
+FILSCR = $084D 
+FINE_X = $0926 
+IRQ1 = $087F 
+IRQ1_DONE = $08A4 
+IRQ2 = $08B6 
+IRQ2_DONE = $0900 
+MAIN = $087C 
+PUT_CHAR = $08E5 
+SCROLLTEXT = $092A 
+SHIFTLP = $08C7 
+START = $0810 
+TEXT_IDX = $0928 
+WRAP_TEXT = $08F3 
+
+******* 1 Unused label(s) *******
+START
+
+******* 22 Variable(s) *******
+BG_COLOR  = $0000
+BORDER_COLOR  = $0000
+CIA1ICR  = $DC0D
+COLBASE  = $D800
+IRQ1_LINE  = $0064
+IRQ2_LINE  = $009A
+IRQVEC  = $0314
+SCRBASE  = $0400
+SCROLL_COL  = $D9E0
+SCROLL_COLOR  = $0007
+SCROLL_ROW  = $000C
+SCROLL_SCR  = $05E0
+SID_INIT  = $8000
+SID_PLAY  = $8003
+tgt_c64  = $0001
+VICBGC  = $D021
+VICCOL  = $D020
+VICCTRL1  = $D011
+VICCTRL2  = $D016
+VICIRQ  = $D019
+VICIRQM  = $D01A
+VICRAST  = $D012
+******* 6 Unused variables(s) *******
+COLBASE
+SCRBASE
+SCROLL_COL
+SCROLL_ROW
+SCROLL_SCR
+tgt_c64
+
